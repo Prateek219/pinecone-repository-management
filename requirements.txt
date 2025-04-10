@@ -1,1 +1,6 @@
- 
+fastapi
+uvicorn
+sentence-transformers
+langchain
+PyMuPDF
+pinecone
