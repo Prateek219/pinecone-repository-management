@@ -3,4 +3,5 @@ uvicorn
 sentence-transformers
 langchain
 PyMuPDF
+firebase-admin
 pinecone

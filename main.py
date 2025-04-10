@@ -8,11 +8,25 @@ import os
 import re
 from pinecone import Pinecone, ServerlessSpec
 import time
+import firebase_admin
+from firebase_admin import credentials, firestore
+from fastapi import FastAPI, HTTPException
 
+# Initialize FastAPI app
+app = FastAPI()
+
+# Initialize Firebase app with service account
+cred = credentials.Certificate("C:/Users/rocks/Downloads/resource-rag-management-firebase-adminsdk-fbsvc-83e209b8e3.json")
+firebase_admin.initialize_app(cred, {
+    'projectId': 'resource-rag-management',
+})
+
+# Firestore client
+db = firestore.client()
 
 
 # ---- Config ----
-API_KEY = "pcsk_7Wh7eu_4V9CacarBGTZzW2oGtsXFv4bsJEB75QCen7pQ7eco6rcZ2X5BnTXRy2gFi9nAHo"
+API_KEY = # add key
 INDEX_NAME = "upsc-langchain-pinecone"
 REGION = "us-east-1"
 CLOUD = "aws"
@@ -82,6 +96,16 @@ async def upload_pdf(file: UploadFile = File(...)):
 
             index.upsert(batch)
             total_upserted += len(batch)
+            timestamp = datetime.utcnow().isoformat()
+
+            doc_data = {
+                "uuid": str(uuid.uuid4()),
+                "resource_id": resource_id,
+                "timestamp": timestamp
+            }
+
+            db.collection("Resource-list").add(doc_data)
+            print({"message": "Document added", "data": doc_data})
             print(f"✅ Batch {i // batch_size + 1}: Upserted {len(batch)} vectors")
 
         return {
@@ -120,9 +144,21 @@ def query_pinecone(payload: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ---- 4. List Documents (optional) ----
-@app.get("/documents")
+@app.get("/resources-list")
 def list_documents():
     try:
-        return {"message": "Listing documents not implemented — requires external DB or caching."}
+        docs_ref = db.collection("Resource-list")
+        docs = docs_ref.stream()
+
+        documents_list = []
+        for doc in docs:
+            data = doc.to_dict()
+            documents_list.append({
+                "uuid": data.get("uuid"),
+                "resources-name": data.get("resource_id"),
+                "timestamp": data.get("timestamp")
+            })
+
+        return {"documents": documents_list}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
