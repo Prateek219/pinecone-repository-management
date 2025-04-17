@@ -26,7 +26,7 @@ db = firestore.client()
 
 
 # ---- Config ----
-API_KEY = # add key
+API_KEY = "pcsk_7Wh7eu_4V9CacarBGTZzW2oGtsXFv4bsJEB75QCen7pQ7eco6rcZ2X5BnTXRy2gFi9nAHo"
 INDEX_NAME = "upsc-langchain-pinecone"
 REGION = "us-east-1"
 CLOUD = "aws"
@@ -117,6 +117,22 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/review-pdf")
+async def review_pdf(file: UploadFile = File(...)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="PDF Review")
+
+    try:
+        contents = await file.read()
+        doc = fitz.open(stream=contents, filetype="pdf")
+        text = "".join([clean_text(page.get_text()) for page in doc])
+        return text
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---- 2. Delete Document ----
 @app.delete("/documents/{document_id}")
 def delete_document(document_id: str):
@@ -155,7 +171,7 @@ def list_documents():
             data = doc.to_dict()
             documents_list.append({
                 "uuid": data.get("uuid"),
-                "resources-name": data.get("resource_id"),
+                "resources_name": data.get("resource_id"),
                 "timestamp": data.get("timestamp")
             })
 
