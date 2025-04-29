@@ -10,7 +10,15 @@ from pinecone import Pinecone, ServerlessSpec
 import time
 import firebase_admin
 from firebase_admin import credentials, firestore
-from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+from typing import List,Dict,Any, Optional
+import base64
+import json
+from mistralai import Mistral
+from pydantic import BaseModel
+from app.prompts.prompts_library import first_prompt, middle_prompt, last_prompt
+from app.service_log.combine_answer import merge_json_blocks
+
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -23,6 +31,9 @@ firebase_admin.initialize_app(cred, {
 
 # Firestore client
 db = firestore.client()
+
+class ImageRequest(BaseModel):
+    encoded_images: List[str]
 
 
 # ---- Config ----
@@ -59,6 +70,77 @@ def clean_text(text):
     text = re.sub(r'\n+', ' ', text)
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
+
+
+
+MISTRAL_API_KEY = 
+client = Mistral(api_key=MISTRAL_API_KEY)
+
+class FinetuningData(BaseModel):
+    question: str
+    answer: str
+    feedback:  List[List[str]]
+    total_marks: Optional[int]
+    maximum_marks: Optional[int]
+    word_limit: Optional[int]
+    hand_writting_and_clarity: str
+    login_id: str
+
+# Function to encode image content to base64
+def encode_image(file_bytes: bytes) -> str:
+    return base64.b64encode(file_bytes).decode("utf-8")
+
+# Summarization function for multiple images
+def summarize_images(encoded_images: List[str]) -> str:
+    if not encoded_images:
+        return {"error": "No images provided"}
+
+    outputs = []
+    system_message = {
+        "role": "system",
+        "content": """You are an expert summarizer.
+                    Always focus only on the meaningful educational content, such as study material, questions, instructions, and diagrams.
+                    Ignore irrelevant information such as notebook headers, coaching institute names (e.g., "Ravi IAS"), page margins, watermarks, "don't write on this side," or any other non-content markings.
+                    Your task is to extract and summarize only the core content clearly and precisely
+                     **Strict JSON Output**  
+                        - Your response MUST be pure, valid JSON  
+                        - NO Markdown code blocks (```json) or extra text outside the JSON  
+                        - Use double quotes for all strings  """
+    }
+    for idx, img in enumerate(encoded_images):
+        if idx == 0:
+            prompt = first_prompt
+        elif idx == len(encoded_images) - 1:
+            prompt = last_prompt
+        else:
+            prompt = middle_prompt
+
+        message = [
+            system_message,
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img}"}
+                ]
+            }
+        ]
+
+        response = client.chat.complete(
+            model="pixtral-large-latest",
+            messages=message,
+            max_tokens=2000,
+            temperature=0.2
+        )
+
+        output_text = response.choices[0].message.content
+        outputs.append(output_text)
+
+    # Send each message to model and collect outputs 
+    merge_output = merge_json_blocks(outputs)
+    return merge_output
+
+
 
 # ---- 1. Upload PDF ----
 @app.post("/upload-pdf")
@@ -176,5 +258,51 @@ def list_documents():
             })
 
         return {"documents": documents_list}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.post("/summarize")
+async def summarize_images_endpoint(files: List[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+
+    base64_images = []
+    
+
+    for file in files:
+        print(len(files)) 
+        if not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"{file.filename} is not a valid image.")
+        content = await file.read()
+        base64_images.append(encode_image(content))
+
+    raw_output = summarize_images(base64_images)   
+    return JSONResponse(content={"output": raw_output}, media_type="application/json")
+
+
+@app.post("/api/save-finetuning")
+async def save_finetuning(data: FinetuningData):
+    try:
+        unique_id = str(uuid.uuid4())
+        timestamp = datetime.utcnow().isoformat()
+        doc_data = {
+            "unique_id": unique_id,
+            "timestamp": timestamp,
+            "login_id": data.login_id,
+            "question": data.question,
+            "answer": data.answer,
+            "feedback": data.feedback,
+            "total_marks": data.total_marks,
+            "maximum_marks": data.maximum_marks,
+            "word_limit": data.word_limit,
+            "hand_writting_and_clarity": data.hand_writting_and_clarity
+        }
+
+        db.collection("answer-data").document(unique_id).set(doc_data)
+
+        return {"message": "Data saved successfully", "unique_id": unique_id}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

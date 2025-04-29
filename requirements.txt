@@ -5,3 +5,5 @@ langchain
 PyMuPDF
 firebase-admin
 pinecone
+mistralai
+python-multipart
