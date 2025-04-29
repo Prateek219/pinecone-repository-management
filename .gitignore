@@ -1,1 +1,87 @@
- 
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+*.env
+*.venv
+
+# Environment variables
+.env
+.env.*
+
+# VS Code
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyInstaller
+dist/
+build/
+*.spec
+
+# setuptools egg files
+*.egg
+*.egg-info/
+.eggs/
+
+# pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# pytest
+.cache/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# coverage
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# PyCharm
+.idea/
+
+# Logs
+*.log
+
+# Sphinx
+docs/_build/
+
+# Mac/Linux system files
+.DS_Store
+Thumbs.db
+
+# Model/data artifacts
+*.pkl
+*.joblib
+*.npy
+*.npz
+*.h5
+
+# Optional: compiled binary or wheel output
+*.whl
+
+# FastAPI docs cache
+openapi.json
+
+# Temporary files
+*.tmp
+*.swp
