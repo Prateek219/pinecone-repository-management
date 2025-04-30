@@ -11,10 +11,11 @@ import time
 import firebase_admin
 from firebase_admin import credentials, firestore
 from fastapi.responses import JSONResponse
-from typing import List,Dict,Any, Optional
+from typing import List,Dict,Any, Optional,Union
 import base64
 import json
 from mistralai import Mistral
+from datetime import datetime
 from pydantic import BaseModel
 from app.prompts.prompts_library import first_prompt, middle_prompt, last_prompt
 from app.service_log.combine_answer import merge_json_blocks
@@ -73,14 +74,18 @@ def clean_text(text):
 
 
 
-MISTRAL_API_KEY = 
+MISTRAL_API_KEY = "jrFzaXMzYdyGONqbpctYUA4W89wdBoCk"
 client = Mistral(api_key=MISTRAL_API_KEY)
+
+class FeedbackItem(BaseModel):
+    concernedFeedback: str
+    relatedText: str
 
 class FinetuningData(BaseModel):
     question: str
     answer: str
-    feedback:  List[List[str]]
-    total_marks: Optional[int]
+    feedback: List[FeedbackItem]  # corrected to list of objects
+    total_marks: Optional[Union[float, int]]
     maximum_marks: Optional[int]
     word_limit: Optional[int]
     hand_writting_and_clarity: str
@@ -130,7 +135,7 @@ def summarize_images(encoded_images: List[str]) -> str:
             model="pixtral-large-latest",
             messages=message,
             max_tokens=2000,
-            temperature=0.2
+            temperature=0.2,
         )
 
         output_text = response.choices[0].message.content
@@ -293,16 +298,27 @@ async def save_finetuning(data: FinetuningData):
             "login_id": data.login_id,
             "question": data.question,
             "answer": data.answer,
-            "feedback": data.feedback,
+            "feedback": [item.dict() for item in data.feedback],
             "total_marks": data.total_marks,
             "maximum_marks": data.maximum_marks,
             "word_limit": data.word_limit,
             "hand_writting_and_clarity": data.hand_writting_and_clarity
         }
 
-        db.collection("answer-data").document(unique_id).set(doc_data)
+        db.collection("handWrittenAnswerData").document(unique_id).set(doc_data)
 
         return {"message": "Data saved successfully", "unique_id": unique_id}
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/get-finetuning-stats")
+async def get_finetuning_stats():
+    try:
+        docs = db.collection("handWrittenAnswerData").limit(1000).stream()
+        total = sum(1 for _ in docs)
+        return {"total_count": total}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
