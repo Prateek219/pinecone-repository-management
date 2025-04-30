@@ -19,13 +19,17 @@ from datetime import datetime
 from pydantic import BaseModel
 from app.prompts.prompts_library import first_prompt, middle_prompt, last_prompt
 from app.service_log.combine_answer import merge_json_blocks
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # Initialize FastAPI app
 app = FastAPI()
 
 # Initialize Firebase app with service account
-cred = credentials.Certificate("C:/Users/rocks/Downloads/resource-rag-management-firebase-adminsdk-fbsvc-83e209b8e3.json")
+cred = credentials.Certificate(os.environ.get("FIREBASE_CRED"))
 firebase_admin.initialize_app(cred, {
     'projectId': 'resource-rag-management',
 })
@@ -38,10 +42,11 @@ class ImageRequest(BaseModel):
 
 
 # ---- Config ----
-API_KEY = "pcsk_7Wh7eu_4V9CacarBGTZzW2oGtsXFv4bsJEB75QCen7pQ7eco6rcZ2X5BnTXRy2gFi9nAHo"
-INDEX_NAME = "upsc-langchain-pinecone"
-REGION = "us-east-1"
-CLOUD = "aws"
+API_KEY = os.environ.get("API_KEY")
+INDEX_NAME = os.environ.get("INDEX_NAME")
+REGION = os.environ.get("REGION")
+CLOUD = os.environ.get("CLOUD")
+
 EMBEDDING_MODEL = 'BAAI/bge-large-en-v1.5'
 
 # ---- Init ----
@@ -74,7 +79,7 @@ def clean_text(text):
 
 
 
-MISTRAL_API_KEY = "jrFzaXMzYdyGONqbpctYUA4W89wdBoCk"
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 client = Mistral(api_key=MISTRAL_API_KEY)
 
 class FeedbackItem(BaseModel):
