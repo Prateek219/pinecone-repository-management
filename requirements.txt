@@ -7,3 +7,5 @@ firebase-admin==6.8.0
 pinecone==6.0.2
 mistralai==1.7.0
 python-multipart==0.0.20
+python-dotenv==1.1.0
+
