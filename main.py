@@ -21,6 +21,7 @@ from app.prompts.prompts_library import first_prompt, middle_prompt, last_prompt
 from app.service_log.combine_answer import merge_json_blocks
 from datetime import datetime
 from dotenv import load_dotenv
+from enum import Enum
 
 load_dotenv()
 
@@ -95,6 +96,7 @@ class FinetuningData(BaseModel):
     word_limit: Optional[int]
     hand_writting_and_clarity: str
     login_id: str
+    paperType : str
 
 # Function to encode image content to base64
 def encode_image(file_bytes: bytes) -> str:
@@ -307,7 +309,8 @@ async def save_finetuning(data: FinetuningData):
             "total_marks": data.total_marks,
             "maximum_marks": data.maximum_marks,
             "word_limit": data.word_limit,
-            "hand_writting_and_clarity": data.hand_writting_and_clarity
+            "hand_writting_and_clarity": data.hand_writting_and_clarity,
+            "paperType": data.paperType
         }
 
         db.collection("handWrittenAnswerData").document(unique_id).set(doc_data)
@@ -327,3 +330,14 @@ async def get_finetuning_stats():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class PaperEnum(str, Enum):
+    GS1 = "GS1"
+    GS2 = "GS2"
+    GS3 = "GS3"
+    GS4 = "GS4"
+    ESSAY = "ESSAY"
+
+@app.get("/paper-types")
+async def get_paper_types():
+    return [paper.value for paper in PaperEnum]
