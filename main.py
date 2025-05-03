@@ -20,6 +20,8 @@ from app.prompts.prompts_library import first_prompt, middle_prompt, last_prompt
 from app.service_log.combine_answer import merge_json_blocks
 from datetime import datetime
 from dotenv import load_dotenv
+from app.graph.graph import process_upsc_answer
+from app.graph.agents import merge_json_blocks
 
 load_dotenv()
 
@@ -96,54 +98,54 @@ def encode_image(file_bytes: bytes) -> str:
     return base64.b64encode(file_bytes).decode("utf-8")
 
 # Summarization function for multiple images
-def summarize_images(encoded_images: List[str]) -> str:
-    if not encoded_images:
-        return {"error": "No images provided"}
+# def summarize_images(encoded_images: List[str]) -> str:
+#     if not encoded_images:
+#         return {"error": "No images provided"}
 
-    outputs = []
-    system_message = {
-        "role": "system",
-        "content": """You are an expert summarizer.
-                    Always focus only on the meaningful educational content, such as study material, questions, instructions, and diagrams.
-                    Ignore irrelevant information such as notebook headers, coaching institute names (e.g., "Ravi IAS"), page margins, watermarks, "don't write on this side," or any other non-content markings.
-                    Your task is to extract and summarize only the core content clearly and precisely
-                     **Strict JSON Output**  
-                        - Your response MUST be pure, valid JSON  
-                        - NO Markdown code blocks (```json) or extra text outside the JSON  
-                        - Use double quotes for all strings  """
-    }
-    for idx, img in enumerate(encoded_images):
-        if idx == 0:
-            prompt = first_prompt
-        elif idx == len(encoded_images) - 1:
-            prompt = last_prompt
-        else:
-            prompt = middle_prompt
+#     outputs = []
+#     system_message = {
+#         "role": "system",
+#         "content": """You are an expert summarizer.
+#                     Always focus only on the meaningful educational content, such as study material, questions, instructions, and diagrams.
+#                     Ignore irrelevant information such as notebook headers, coaching institute names (e.g., "Ravi IAS"), page margins, watermarks, "don't write on this side," or any other non-content markings.
+#                     Your task is to extract and summarize only the core content clearly and precisely
+#                      **Strict JSON Output**  
+#                         - Your response MUST be pure, valid JSON  
+#                         - NO Markdown code blocks (```json) or extra text outside the JSON  
+#                         - Use double quotes for all strings  """
+#     }
+#     for idx, img in enumerate(encoded_images):
+#         if idx == 0:
+#             prompt = first_prompt
+#         elif idx == len(encoded_images) - 1:
+#             prompt = last_prompt
+#         else:
+#             prompt = middle_prompt
 
-        message = [
-            system_message,
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img}"}
-                ]
-            }
-        ]
+#         message = [
+#             system_message,
+#             {
+#                 "role": "user",
+#                 "content": [
+#                     {"type": "text", "text": prompt},
+#                     {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img}"}
+#                 ]
+#             }
+#         ]
 
-        response = client.chat.complete(
-            model="pixtral-large-latest",
-            messages=message,
-            max_tokens=2000,
-            temperature=0.2
-        )
+#         response = client.chat.complete(
+#             model="pixtral-large-latest",
+#             messages=message,
+#             max_tokens=2000,
+#             temperature=0.2
+#         )
 
-        output_text = response.choices[0].message.content
-        outputs.append(output_text)
+#         output_text = response.choices[0].message.content
+#         outputs.append(output_text)
 
-    # Send each message to model and collect outputs 
-    merge_output = merge_json_blocks(outputs)
-    return merge_output
+#     # Send each message to model and collect outputs 
+#     merge_output = merge_json_blocks(outputs)
+#     return merge_output
 
 
 
@@ -268,22 +270,61 @@ def list_documents():
 
 
 
+# @app.post("/summarize")
+# async def summarize_images_endpoint(files: List[UploadFile] = File(...)):
+#     if not files:
+#         raise HTTPException(status_code=400, detail="No files uploaded.")
+
+#     base64_images = []
+    
+
+#     for file in files:
+#         print(len(files)) 
+#         if not file.content_type.startswith("image/"):
+#             raise HTTPException(status_code=400, detail=f"{file.filename} is not a valid image.")
+#         content = await file.read()
+#         base64_images.append(encode_image(content))
+
+#     raw_output = process_upsc_answer(base64_images)   
+#     return JSONResponse(content={"output": raw_output}, media_type="application/json")
+
+#  New Version
 @app.post("/summarize")
 async def summarize_images_endpoint(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
 
+    # Limit number of files processed
+    if len(files) > 5:
+        files = files[:5]  # Only process first 5 files
+        
     base64_images = []
     
-
     for file in files:
-        print(len(files)) 
         if not file.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail=f"{file.filename} is not a valid image.")
         content = await file.read()
         base64_images.append(encode_image(content))
 
-    raw_output = summarize_images(base64_images)   
+    # Process images in smaller batches if needed
+    if len(base64_images) > 2:
+        # Process in batches of 2
+        all_results = []
+        for i in range(0, len(base64_images), 2):
+            batch = base64_images[i:i+2]
+            batch_result = process_upsc_answer(base64_images=batch)
+            all_results.append(batch_result)
+        
+        # Merge results if we processed in batches
+        # from .agents import merge_json_blocks
+        if len(all_results) > 1:
+            raw_output = merge_json_blocks(all_results)
+        else:
+            raw_output = all_results[0]
+    else:
+        # Process directly for small number of images
+        raw_output = process_upsc_answer(base64_images=base64_images)
+        
     return JSONResponse(content={"output": raw_output}, media_type="application/json")
 
 
