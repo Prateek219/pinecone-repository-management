@@ -26,8 +26,6 @@ from enum import Enum
 load_dotenv()
 
 
-# Initialize FastAPI app
-app = FastAPI()
 
 # Initialize Firebase app with service account
 cred = credentials.Certificate(os.environ.get("FIREBASE_CRED"))
@@ -273,7 +271,9 @@ def list_documents():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the UPSC Answer Processing API"}
 
 @app.post("/summarize")
 async def summarize_images_endpoint(files: List[UploadFile] = File(...)):
