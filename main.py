@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sentence_transformers import SentenceTransformer
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -85,6 +85,9 @@ class FeedbackItem(BaseModel):
     concernedFeedback: str
     relatedText: str
 
+class PDFData(BaseModel):
+    extractedText: str
+
 class FinetuningData(BaseModel):
     question: str
     answer: str
@@ -151,23 +154,17 @@ def summarize_images(encoded_images: List[str]) -> str:
     return merge_output
 
 
-
-# ---- 1. Upload PDF ----
 @app.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
+async def upload_pdf(data: PDFData):
     try:
-        contents = await file.read()
-        doc = fitz.open(stream=contents, filetype="pdf")
-        text = "".join([clean_text(page.get_text()) for page in doc])
+        extractedText = data.extractedText
+        print(extractedText)
 
-        chunks = text_splitter.split_text(text)
+        chunks = text_splitter.split_text(extractedText)
         embeddings = model.encode(chunks).tolist()
 
         document_id = str(uuid.uuid4())
-        resource_id = file.filename
+        resource_id = str(uuid.uuid4()) 
 
         batch_size = 50
         total_upserted = 0
