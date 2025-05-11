@@ -152,56 +152,56 @@ def summarize_images(encoded_images: List[str]) -> str:
     # Send each message to model and collect outputs 
     merge_output = merge_json_blocks(outputs)
     return merge_output
-
+    
 
 @app.post("/upload-pdf")
-async def upload_pdf(data: PDFData):
-    try:
-        extractedText = data.extractedText
-        print(extractedText)
+async def upload_pdf(data: dict):
+    file_name = data.get("fileName")
+    extracted_text = data.get("extracted_text")
 
-        chunks = text_splitter.split_text(extractedText)
+    if not file_name or not file_name.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF filenames are supported.")
+
+    if not extracted_text:
+        raise HTTPException(status_code=400, detail="No extracted text provided.")
+
+    try:
+        chunks = text_splitter.split_text(extracted_text)
         embeddings = model.encode(chunks).tolist()
 
+        # IDs
         document_id = str(uuid.uuid4())
-        resource_id = str(uuid.uuid4()) 
+        book_title = file_name.rsplit(".", 1)[0]
+   
+        doc_data = {
+            "document_id": document_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "file_name": file_name,
+        }
+        db.collection("Resource-list").add(doc_data)
+        print(f"📚 Resource saved: {book_title} ({document_id})")
 
+        # Upsert to Pinecone
         batch_size = 50
-        total_upserted = 0
-
         for i in range(0, len(chunks), batch_size):
             batch = [
                 (
-                    str(uuid.uuid4()), 
-                    emb, 
+                    str(uuid.uuid4()),  # vector ID
+                    emb,
                     {
                         "text": chunk,
                         "document_id": document_id,
-                        "resource_id": resource_id
                     }
                 )
                 for chunk, emb in zip(chunks[i:i + batch_size], embeddings[i:i + batch_size])
             ]
-
             index.upsert(batch)
-            total_upserted += len(batch)
-            timestamp = datetime.utcnow().isoformat()
-
-            doc_data = {
-                "uuid": str(uuid.uuid4()),
-                "resource_id": resource_id,
-                "timestamp": timestamp
-            }
-
-            db.collection("Resource-list").add(doc_data)
-            print({"message": "Document added", "data": doc_data})
-            print(f"✅ Batch {i // batch_size + 1}: Upserted {len(batch)} vectors")
+            print(f"✅ Batch {i // batch_size + 1}: Upserted {len(batch)} chunks")
 
         return {
-            "message": "PDF uploaded and indexed.",
+            "message": "Extracted text indexed successfully.",
             "document_id": document_id,
-            "resource_id": resource_id,
-            "total_chunks": total_upserted
+            "total_chunks": len(chunks)
         }
 
     except Exception as e:
@@ -259,8 +259,8 @@ def list_documents():
         for doc in docs:
             data = doc.to_dict()
             documents_list.append({
-                "uuid": data.get("uuid"),
-                "resources_name": data.get("resource_id"),
+                "book_title": data.get("book_title", data.get("file_name", "Unknown")),
+                "document_id": data.get("document_id"),
                 "timestamp": data.get("timestamp")
             })
 
