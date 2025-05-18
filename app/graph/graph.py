@@ -150,39 +150,3 @@ def process_upsc_answer(
     
     # Otherwise return the complete state for debugging
     return result
-
-# Example of usage
-# if __name__ == "__main__":
-#     # Example OCR text from a UPSC answer sheet
-#     sample_ocr_text = """
-#     VAJIRAM & RAVI
-    
-#     (Q. No.) 3
-    
-#     The snowfall feeds to the glaciers which are source of Himalayan rivers. 
-#     Agriculture - These hold immense importance for Rabi crops such as wheat.
-#     However, heavy rain and hailstorms can be damaging to the crops.
-    
-#     Disasters during summer and monsoon seasons:
-    
-#     1. Occasionally they may interact with Monsoon trough and lead to cloudburst, lightning, etc.
-#     2. Leh Floods (2010), Uttarakhand floods (2013), Kashmir floods (2014) etc. have been linked to Western Disturbances causing catastrophic losses.
-    
-#     Conclusion can be that weak western disturbances are associated with crop failure and water problems across North India and strong WD helps fight water scarcity.
-    
-#     Introduction: 0.5
-#     Body: 3
-#     Conclusion: —
-#     Marks: 3.5
-    
-#     Suggestions: Try to write conclusion as well.
-#     """
-    
-#     # Use your API key here
-#     api_key = "your-mistral-api-key-here"
-    
-#     # Process the sample text
-#     result = process_upsc_answer(ocr_texts=sample_ocr_text, api_key=api_key)
-    
-#     # Print the result
-#     print(json.dumps(result, indent=2))

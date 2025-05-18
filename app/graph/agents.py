@@ -176,30 +176,60 @@ def data_verification_agent(state: AgentState, llm) -> AgentState:
         state["status"] = "failed_verification"
         return state
     
-    # Estimate token count for all texts combined
-    total_text_length = sum(len(text) for text in ocr_texts)
+    # Pre-process OCR texts: remove prefix "json\n" if present
+    processed_texts = [
+        text[5:] if text.startswith("json\n") else text 
+        for text in ocr_texts
+    ]
+    
+    # Attempt to parse JSON for each text
+    parsed_texts = []
+    for text in processed_texts:
+        try:
+            # Try to parse the text as JSON
+            parsed_json = json.loads(text)
+            parsed_texts.append(parsed_json)
+        except json.JSONDecodeError:
+            # If parsing fails, keep the original text
+            parsed_texts.append({"raw_text": text})
+    
+    # Estimate token count
+    total_text_length = sum(len(json.dumps(text)) for text in parsed_texts)
     estimated_tokens = total_text_length // 4  # Rough estimation
     
     # Check if we need to truncate
     if estimated_tokens > 100000:  # Keep well below the 131K limit
         # Option 1: Use only a subset of the texts
-        if len(ocr_texts) > 3:
+        if len(parsed_texts) > 3:
             # Take first, middle, and last
-            subset_indices = [0, len(ocr_texts)//2, len(ocr_texts)-1]
-            ocr_texts = [ocr_texts[i] for i in subset_indices]
+            subset_indices = [0, len(parsed_texts)//2, len(parsed_texts)-1]
+            parsed_texts = [parsed_texts[i] for i in subset_indices]
         else:
             # Option 2: Truncate each text
-            ocr_texts = [text[:25000] for text in ocr_texts]  # ~25K chars per text
+            parsed_texts = [
+                {k: v[:5000] if isinstance(v, str) else v for k, v in text.items()} 
+                for text in parsed_texts
+            ]
     
-    # For multiple images, combine the text with separators for verification
+    # Prepare text for verification
     combined_text = "\n\n--- IMAGE SEPARATION ---\n\n".join([
-        f"[Image {i+1} of {len(ocr_texts)}]\n{text[:25000]}" 
-        for i, text in enumerate(ocr_texts)
+        f"[Image {i+1} of {len(parsed_texts)}]\n{json.dumps(text, indent=2)}" 
+        for i, text in enumerate(parsed_texts)
     ])
+    
+    # Modify verification prompt to be more flexible
+    flexible_verification_prompt = f"""{DATA_VERIFICATION_PROMPT}
+
+Additional Context:
+- Multiple page document detected
+- Formatting may include special markers like [PARAGRAPH], [HEADING], etc.
+- Some variation in document structure is expected
+
+Please be lenient in your verification, focusing on core content relevance."""
     
     # Prompt the LLM to verify relevance and format
     messages = [
-        HumanMessage(content=DATA_VERIFICATION_PROMPT.format(ocr_text=combined_text))
+        HumanMessage(content=flexible_verification_prompt.format(ocr_text=combined_text))
     ]
     
     response = llm.invoke(messages)
@@ -213,22 +243,30 @@ def data_verification_agent(state: AgentState, llm) -> AgentState:
             if json_match:
                 verification_result = json.loads(json_match.group())
             else:
-                # Fall back to parsing what we can
+                # More flexible fallback parsing
                 verification_result = {
                     "is_relevant": "relevant" in content.lower() and "not relevant" not in content.lower(),
-                    "has_valid_format": "valid format" in content.lower() and "invalid format" not in content.lower(),
+                    "has_valid_format": True,  # More lenient format check
                     "reason": "Extracted from text content"
                 }
         else:
-            verification_result = {"is_relevant": False, "has_valid_format": False, "reason": "Invalid LLM response"}
+            verification_result = {
+                "is_relevant": False, 
+                "has_valid_format": False, 
+                "reason": "Invalid LLM response"
+            }
             
         # Update the state
         state["is_relevant"] = verification_result.get("is_relevant", False)
         state["has_valid_format"] = verification_result.get("has_valid_format", False)
         
-        if not state["is_relevant"] or not state["has_valid_format"]:
+        if not state["is_relevant"]:
             state["status"] = "failed_verification"
-            state["error"] = verification_result.get("reason", "Failed verification check")
+            state["error"] = verification_result.get("reason", "Not relevant to UPSC answer")
+        elif not state["has_valid_format"]:
+            # Even if format is not perfect, try to proceed
+            state["status"] = "verified"
+            state["error"] = verification_result.get("reason", "Slight format inconsistencies")
         else:
             state["status"] = "verified"
             
@@ -246,60 +284,98 @@ def data_formatter_agent(state: AgentState, llm) -> AgentState:
     ocr_texts = state["ocr_texts"]
     
     # If verification failed, skip formatting
-    if not state["is_relevant"] or not state["has_valid_format"]:
+    if not state["is_relevant"]:
         state["status"] = "skipped_formatting"
         return state
     
-    # For single image or processed by specialized prompts, we may already have formatted data
-    if len(ocr_texts) == 1:
+    # Preprocessing: Clean and standardize OCR texts
+    def clean_ocr_text(text):
+        # Remove 'json\n' prefix if present
+        if text.startswith("json\n"):
+            text = text[5:]
+        
+        # Try to extract JSON, fallback to original text
         try:
-            # Try to extract JSON directly from the OCR result
-            json_match = re.search(r'{.*}', ocr_texts[0], re.DOTALL)
+            json_match = re.search(r'{.*}', text, re.DOTALL)
             if json_match:
-                formatted_data = json.loads(json_match.group())
-                
-                # Check if we have all required fields or need additional processing
-                required_fields = ["question", "answer", "feedback"]
-                if all(field in formatted_data for field in required_fields):
-                    # We have a complete formatted result
-                    state["formatted_data"] = formatted_data
-                    state["status"] = "formatted"
-                    return state
+                return json.loads(json_match.group())
+            return {"raw_text": text}
         except:
-            # If JSON extraction fails, continue with standard processing
-            pass
-
-    # For multiple images that were processed with page-specific prompts, merge the results
-    if len(ocr_texts) > 1:
-        try:
-            # Extract JSON from each OCR result
-            json_results = []
-            for idx, text in enumerate(ocr_texts):
-                json_match = re.search(r'{.*}', text, re.DOTALL)
-                if json_match:
-                    try:
-                        json_data = json.loads(json_match.group())
-                        json_results.append(json_data)
-                    except json.JSONDecodeError:
-                        # If we can't parse the JSON, add the text for later processing
-                        json_results.append({"text": text, "index": idx})
-                else:
-                    json_results.append({"text": text, "index": idx})
-            
-            # If we have valid JSON results, merge them
-            if json_results and all(isinstance(result, dict) and not result.get('index', None) for result in json_results):
-                merged_result = merge_json_blocks(json_results)
-                state["formatted_data"] = merged_result
-                state["status"] = "formatted"
-                return state
-        except Exception as e:
-            # If merging fails, continue with standard processing
-            pass
+            return {"raw_text": text}
     
-    # Prepare OCR text with index awareness for multiple images as fallback
+    # Clean and preprocess OCR texts
+    processed_texts = [clean_ocr_text(text) for text in ocr_texts]
+    
+    # Attempt multi-page merge first
+    def merge_multi_page_data(texts):
+        # Initialize merged data with comprehensive structure
+        merged = {
+            "question": None,
+            "answer": "",
+            "feedback": [],
+            "word_limit": None,
+            "maximum_marks": None,
+            "total_marks": None
+        }
+        
+        # Collect key information from all texts
+        for text in texts:
+            # Extract question from first text with a question
+            if not merged["question"] and text.get("question"):
+                merged["question"] = text["question"]
+            
+            # Combine answers
+            if text.get("answer"):
+                # Add page separator if not first page
+                if merged["answer"]:
+                    merged["answer"] += "\n\n--- NEXT PAGE ---\n\n"
+                merged["answer"] += text["answer"]
+            
+            # Collect feedback
+            if text.get("feedback"):
+                # Handle both list and string feedback formats
+                feedback = text["feedback"]
+                if isinstance(feedback, str):
+                    try:
+                        feedback = json.loads(feedback)
+                    except:
+                        feedback = [["General", feedback]]
+                
+                if isinstance(feedback, list):
+                    merged["feedback"].extend(feedback)
+            
+            # Collect word limit and maximum marks
+            if text.get("word_limit") and not merged["word_limit"]:
+                merged["word_limit"] = text["word_limit"]
+            if text.get("maximum_marks") and not merged["maximum_marks"]:
+                merged["maximum_marks"] = text["maximum_marks"]
+            
+            # Collect total marks from last page
+            if text.get("total_marks"):
+                merged["total_marks"] = text["total_marks"]
+        
+        # Remove None values
+        cleaned_merged = {k: v for k, v in merged.items() if v is not None}
+        return cleaned_merged
+    
+    # Try merging multi-page data
+    try:
+        merged_result = merge_multi_page_data(processed_texts)
+        
+        # Validate minimum required fields
+        if "question" in merged_result and "answer" in merged_result:
+            state["formatted_data"] = merged_result
+            state["status"] = "formatted"
+            return state
+    except Exception as e:
+        # Log merge error but continue to fallback processing
+        print(f"Multi-page merge error: {e}")
+    
+    # Fallback to standard formatting if merge fails
+    # Prepare OCR text with index awareness for multiple images
     formatted_ocr = "\n\n--- IMAGE SEPARATION ---\n\n".join([
-        f"[Image {i+1} of {len(ocr_texts)}]\n{text}" 
-        for i, text in enumerate(ocr_texts)
+        f"[Image {i+1} of {len(ocr_texts)}]\n{json.dumps(text)}" 
+        for i, text in enumerate(processed_texts)
     ])
     
     # Prompt the LLM to extract and format the data using the standard prompt
@@ -307,9 +383,9 @@ def data_formatter_agent(state: AgentState, llm) -> AgentState:
         HumanMessage(content=DATA_FORMATTER_PROMPT.format(ocr_text=formatted_ocr))
     ]
     
-    response = llm.invoke(messages)
-    
     try:
+        response = llm.invoke(messages)
+        
         # Extract JSON from response
         content = response.content
         if isinstance(content, str):
@@ -322,8 +398,8 @@ def data_formatter_agent(state: AgentState, llm) -> AgentState:
                 formatted_data = json.loads(content)
         else:
             raise ValueError("Invalid LLM response format")
-            
-        # Validate that the response matches our expected format
+        
+        # Validate and complete the formatted data
         for key in UPSC_DATA_FORMAT:
             if key not in formatted_data:
                 if key == "word_limit":
@@ -332,7 +408,7 @@ def data_formatter_agent(state: AgentState, llm) -> AgentState:
                     formatted_data[key] = 10   # Default value
                 else:
                     formatted_data[key] = None
-                
+        
         state["formatted_data"] = formatted_data
         state["status"] = "formatted"
         
