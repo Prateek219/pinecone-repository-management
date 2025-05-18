@@ -74,6 +74,7 @@ index = pc.Index(INDEX_NAME)
 def clean_text(text):
     text = re.sub(r'\n+', ' ', text)
     text = re.sub(r'\s{2,}', ' ', text)
+    text = re.sub(r'[^\x20-\x7E\u0900-\u097F.,!?()"\':; \n]', '', text)
     return text.strip()
 
 
