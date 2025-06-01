@@ -22,8 +22,6 @@ from app.service_log.combine_answer import merge_json_blocks
 from datetime import datetime
 from dotenv import load_dotenv
 from enum import Enum
-from fastapi.responses import FileResponse
-
 
 load_dotenv()
 
@@ -67,7 +65,7 @@ if INDEX_NAME not in pc.list_indexes().names():
     pc.create_index(
         name=INDEX_NAME,
         dimension=model.get_sentence_embedding_dimension(),
-        metric='cosine',
+        metric='dotproduct',
         spec=ServerlessSpec(cloud=CLOUD, region=REGION)
     )
 index = pc.Index(INDEX_NAME)
@@ -182,7 +180,7 @@ async def upload_pdf(data: dict):
             "file_name": file_name,
         }
         db.collection("Resource-list").add(doc_data)
-        print(f"📚 Resource save[-d: {book_title} ({document_id})")
+        print(f"📚 Resource saved: {book_title} ({document_id})")
 
         # Upsert to Pinecone
         batch_size = 50
@@ -341,85 +339,3 @@ class PaperEnum(str, Enum):
 @app.get("/paper-types")
 async def get_paper_types():
     return [paper.value for paper in PaperEnum]
-
-
-@app.post("/batch-upload-pdfs")
-async def batch_upload_pdfs(files: List[UploadFile] = File(...)):
-    processed_docs = []
-    failed_docs = []
-
-    for file in files:
-        if not file.filename.endswith(".pdf"):
-            failed_docs.append({"file": file.filename, "error": "Not a PDF"})
-            continue
-
-        try:
-            contents = await file.read()
-            doc = fitz.open(stream=contents, filetype="pdf")
-            text = "".join([clean_text(page.get_text()) for page in doc])
-
-            if not text.strip():
-                failed_docs.append({"file": file.filename, "error": "No extractable text"})
-                continue
-
-            # Split and embed
-            chunks = text_splitter.split_text(text)
-            embeddings = model.encode(chunks).tolist()
-
-            document_id = str(uuid.uuid4())
-            book_title = file.filename.rsplit(".", 1)[0]
-
-            # Save metadata
-            doc_data = {
-                "document_id": document_id,
-                "timestamp": datetime.utcnow().isoformat(),
-                "file_name": file.filename,
-            }
-            db.collection("Resource-list").add(doc_data)
-
-            # Pinecone upsert
-            batch_size = 50
-            for i in range(0, len(chunks), batch_size):
-                batch = [
-                    (
-                        str(uuid.uuid4()),
-                        emb,
-                        {
-                            "text": chunk,
-                            "document_id": document_id,
-                        }
-                    )
-                    for chunk, emb in zip(chunks[i:i + batch_size], embeddings[i:i + batch_size])
-                ]
-                index.upsert(batch)
-
-            processed_docs.append({
-                "file": file.filename,
-                "document_id": document_id,
-                "total_chunks": len(chunks)
-            })
-
-        except Exception as e:
-            failed_docs.append({"file": file.filename, "error": str(e)})
-
-    return {
-        "processed": processed_docs,
-        "failed": failed_docs,
-    }
-
-@app.get("/export-json")
-async def export_firestore_collection():
-    try:
-        # Fetch all documents
-        docs = db.collection("handWrittenAnswerData").stream()
-        data = {doc.id: doc.to_dict() for doc in docs}
-
-        output_file = "handWrittenAnswerData_export.json"
-        with open(output_file, "w") as f:
-            json.dump(data, f, indent=2)
-
-        return FileResponse(path=output_file, filename=output_file, media_type='application/json')
-
-    except Exception as e:
-        return {"error": str(e)}
-
